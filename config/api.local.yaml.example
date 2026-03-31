@@ -1,0 +1,2 @@
+server:
+  auth_token: "replace-with-a-strong-shared-api-token"

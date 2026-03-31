@@ -1,0 +1,16 @@
+telegram:
+  bot_token: "replace-with-telegram-bot-token"
+
+api:
+  base_url: "http://api:8000"
+  auth_token: "replace-with-api-auth-token"
+  request_timeout_seconds: 30
+  poll_interval_seconds: 5
+
+inline:
+  debounce_seconds: 1.0
+  cache_time_seconds: 0
+  execution_timeout_seconds: 15
+
+logging:
+  level: "INFO"

@@ -1,0 +1,5 @@
+telegram:
+  bot_token: "123456789:replace-with-telegram-bot-token"
+
+api:
+  auth_token: "replace-with-the-same-api-auth-token"

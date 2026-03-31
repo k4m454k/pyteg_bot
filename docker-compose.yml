@@ -1,0 +1,38 @@
+services:
+  runner-base:
+    image: pytegbot-runner:local
+    build:
+      context: .
+      dockerfile: runner/Dockerfile
+    profiles: ["runner-image"]
+    command: ["python", "-c", "import time; time.sleep(3600)"]
+    restart: "no"
+
+  api:
+    image: pytegbot-api:local
+    build:
+      context: .
+      dockerfile: api/Dockerfile
+    restart: unless-stopped
+    environment:
+      PYTEGBOT_API_CONFIG: /config/api.yaml
+      PYTEGBOT_API_LOCAL_CONFIG: /config/api.local.yaml
+    volumes:
+      - ${PYTEGBOT_CONFIG_DIR:-./config}:/config:ro
+      - /var/run/docker.sock:/var/run/docker.sock
+    ports:
+      - "8000:8000"
+
+  bot:
+    image: pytegbot-bot:local
+    build:
+      context: .
+      dockerfile: bot/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      - api
+    environment:
+      PYTEGBOT_BOT_CONFIG: /config/bot.yaml
+      PYTEGBOT_BOT_LOCAL_CONFIG: /config/bot.local.yaml
+    volumes:
+      - ${PYTEGBOT_CONFIG_DIR:-./config}:/config:ro

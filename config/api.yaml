@@ -1,0 +1,18 @@
+server:
+  host: 0.0.0.0
+  port: 8000
+  auth_token: "replace-with-api-auth-token"
+
+execution:
+  docker_base_url: "unix://var/run/docker.sock"
+  execution_image: "pytegbot-runner:local"
+  max_concurrent_tasks: 2
+  max_timeout_seconds: 20
+  task_ttl_seconds: 1800
+  cleanup_interval_seconds: 60
+  memory_limit: "200m"
+  nano_cpus: 200000000
+  code_env_var: "PYTEGBOT_CODE_B64"
+
+logging:
+  level: "INFO"
