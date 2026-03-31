@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+from contextlib import suppress
 from dataclasses import dataclass
 from typing import Any
 
@@ -22,6 +23,13 @@ class ExecutionResult:
 
 
 @dataclass(slots=True)
+class StreamedExecutionResult:
+    output: str | None = None
+    exit_code: int | None = None
+    output_limit_exceeded: bool = False
+
+
+@dataclass(slots=True)
 class RunningContainerHandle:
     task_id: str
     container: Container | None = None
@@ -38,8 +46,9 @@ class DockerCodeExecutor:
 
     async def execute(self, task_id: str, code: str, timeout_seconds: int) -> ExecutionResult:
         handle = RunningContainerHandle(task_id=task_id)
-        logs: str | None = None
         container: Container | None = None
+        streamed_result: StreamedExecutionResult | None = None
+        stream_task: asyncio.Task[StreamedExecutionResult] | None = None
 
         async with self._lock:
             self._active[task_id] = handle
@@ -66,18 +75,37 @@ class DockerCodeExecutor:
             if handle.cancel_requested:
                 await asyncio.to_thread(self._kill_container, container)
 
-            wait_result = await asyncio.wait_for(
-                asyncio.to_thread(container.wait),
-                timeout=timeout_seconds,
+            stream_task = asyncio.create_task(
+                asyncio.to_thread(self._wait_with_streamed_logs, container),
+                name=f"pytegbot-stream-{task_id}",
             )
-            logs = await asyncio.to_thread(self._read_logs, container)
-            exit_code = self._extract_exit_code(wait_result)
+            done, _ = await asyncio.wait({stream_task}, timeout=timeout_seconds)
+            if stream_task not in done:
+                handle.timed_out = True
+                await asyncio.to_thread(self._kill_container, container)
+                streamed_result = await self._await_stream_result(stream_task)
+            else:
+                streamed_result = stream_task.result()
+
+            logs = streamed_result.output if streamed_result else None
+            exit_code = streamed_result.exit_code if streamed_result else None
 
             if handle.timed_out:
                 return ExecutionResult(
                     status=TaskStatus.TIMED_OUT,
                     output=logs,
                     error=f"Execution exceeded {timeout_seconds} seconds.",
+                    exit_code=exit_code,
+                )
+
+            if streamed_result and streamed_result.output_limit_exceeded:
+                return ExecutionResult(
+                    status=TaskStatus.FAILED,
+                    output=logs,
+                    error=(
+                        "Execution produced too much output and was stopped "
+                        f"after {self._settings.max_output_bytes} bytes."
+                    ),
                     exit_code=exit_code,
                 )
 
@@ -101,23 +129,12 @@ class DockerCodeExecutor:
                 output=logs,
                 exit_code=exit_code,
             )
-        except asyncio.TimeoutError:
-            handle.timed_out = True
-            if container is not None:
-                await asyncio.to_thread(self._kill_container, container)
-                logs = await asyncio.to_thread(self._read_logs, container)
-            return ExecutionResult(
-                status=TaskStatus.TIMED_OUT,
-                output=logs,
-                error=f"Execution exceeded {timeout_seconds} seconds.",
-            )
         except DockerException as exc:
-            if container is not None:
-                logs = await asyncio.to_thread(self._read_logs, container)
             return ExecutionResult(
                 status=TaskStatus.FAILED,
-                output=logs,
+                output=streamed_result.output if streamed_result else None,
                 error=f"Docker execution failed: {exc}",
+                exit_code=streamed_result.exit_code if streamed_result else None,
             )
         finally:
             if container is not None:
@@ -168,14 +185,57 @@ class DockerCodeExecutor:
         except (APIError, NotFound):
             return
 
-    def _read_logs(self, container: Container) -> str | None:
+    async def _await_stream_result(
+        self,
+        stream_task: asyncio.Task[StreamedExecutionResult],
+    ) -> StreamedExecutionResult | None:
         try:
-            raw = container.logs(stdout=True, stderr=True)
-        except (APIError, NotFound):
+            return await asyncio.wait_for(asyncio.shield(stream_task), timeout=5)
+        except (asyncio.TimeoutError, DockerException):
             return None
-        if raw is None:
+
+    def _wait_with_streamed_logs(self, container: Container) -> StreamedExecutionResult:
+        collected = bytearray()
+        total_bytes = 0
+        output_limit_exceeded = False
+        stream = None
+
+        try:
+            stream = container.logs(stdout=True, stderr=True, stream=True, follow=True)
+            for chunk in stream:
+                if not chunk:
+                    continue
+
+                total_bytes += len(chunk)
+                remaining = self._settings.max_output_bytes - len(collected)
+                if remaining > 0:
+                    collected.extend(chunk[:remaining])
+
+                if total_bytes > self._settings.max_output_bytes:
+                    output_limit_exceeded = True
+                    self._kill_container(container)
+                    break
+        finally:
+            close = getattr(stream, "close", None)
+            if callable(close):
+                with suppress(Exception):
+                    close()
+
+        wait_result = container.wait()
+        return StreamedExecutionResult(
+            output=self._decode_output(collected, truncated=output_limit_exceeded),
+            exit_code=self._extract_exit_code(wait_result),
+            output_limit_exceeded=output_limit_exceeded,
+        )
+
+    @staticmethod
+    def _decode_output(raw: bytes, *, truncated: bool) -> str | None:
+        if not raw:
             return None
-        return raw.decode("utf-8", errors="replace").strip() or None
+        text = raw.decode("utf-8", errors="replace")
+        if truncated:
+            text = f"{text}\n..."
+        return text.strip() or None
 
     @staticmethod
     def _extract_exit_code(wait_result: Any) -> int | None:

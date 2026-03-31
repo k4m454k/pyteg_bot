@@ -12,6 +12,7 @@ execution:
   cleanup_interval_seconds: 60
   memory_limit: "200m"
   nano_cpus: 200000000
+  max_output_bytes: 262144
   code_env_var: "PYTEGBOT_CODE_B64"
 
 logging:
