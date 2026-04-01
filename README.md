@@ -53,6 +53,27 @@ Default limits are configured in `config/api.yaml`:
 - CPU limit: `0.2 CPU`
 - task TTL in memory: `30 minutes`
 
+## Preinstalled Executor Libraries
+
+The runner image ships with a small offline-friendly standard toolkit:
+
+- `numpy`: n-dimensional arrays and fast numerical operations
+- `sympy`: symbolic math, algebra, simplification, and equation solving
+- `networkx`: graph structures and graph algorithms
+- `python-dateutil`: flexible date parsing and relative date arithmetic
+- `pytz`: legacy timezone database support
+- `PyYAML`: YAML parsing and serialization
+- `orjson`: fast JSON parsing and serialization
+- `simplejson`: flexible JSON handling, especially useful with types such as `Decimal`
+- `regex`: an extended regular expression engine with features beyond the standard `re` module
+- `tabulate`: formatted plain-text tables for chat-friendly output
+
+These packages are installed directly into the runner image defined in `runner/Dockerfile`.
+
+The executor intentionally does not bundle HTTP-focused libraries as a default feature set, because execution containers have no outbound network access.
+
+On low-power hosts such as a Raspberry Pi, importing heavier libraries like `numpy` or `sympy` can take a noticeable part of the execution timeout during a cold start.
+
 ## Bot Behavior
 
 - Private chats: send Python code directly.
