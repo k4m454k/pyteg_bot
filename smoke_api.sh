@@ -15,11 +15,6 @@ HEALTH_BODY="${TMP_DIR}/health.json"
 CREATE_BODY="${TMP_DIR}/create.json"
 TASK_BODY="${TMP_DIR}/task.json"
 
-if [ "${AUTH_TOKEN}" = "replace-with-api-auth-token" ]; then
-  printf '%s\n' 'Set PYTEGBOT_AUTH_TOKEN before running this script.' >&2
-  exit 1
-fi
-
 if [ -n "${CODE_FILE}" ]; then
   CODE="$(cat "${CODE_FILE}")"
 else

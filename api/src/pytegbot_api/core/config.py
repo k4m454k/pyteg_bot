@@ -19,7 +19,7 @@ class ExecutionSettings(BaseModel):
     execution_image: str = "pytegbot-runner:local"
     max_concurrent_tasks: int = Field(default=2, ge=1, le=16)
     max_timeout_seconds: int = Field(
-        default=20,
+        default=40,
         ge=1,
         le=300,
         validation_alias=AliasChoices("max_timeout_seconds", "timeout_seconds"),
@@ -30,6 +30,12 @@ class ExecutionSettings(BaseModel):
     nano_cpus: int = Field(default=200_000_000, ge=1)
     max_output_bytes: int = Field(default=262_144, ge=1_024, le=16_777_216)
     code_env_var: str = "PYTEGBOT_CODE_B64"
+    output_dir: str = "/tmp/pytegbot-out"
+    output_dir_env_var: str = "PYTEGBOT_OUTPUT_DIR"
+    max_artifact_count: int = Field(default=4, ge=0, le=16)
+    max_artifact_bytes_per_file: int = Field(default=4_194_304, ge=1_024, le=32_000_000)
+    max_artifact_bytes_total: int = Field(default=8_388_608, ge=1_024, le=64_000_000)
+    artifact_storage_dir: str = "/tmp/pytegbot-artifacts"
 
 
 class LoggingSettings(BaseModel):

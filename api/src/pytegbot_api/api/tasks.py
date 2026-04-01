@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi.responses import FileResponse
 
 from pytegbot_api.dependencies import get_task_manager, require_api_token
 from pytegbot_api.services.task_manager import ExecutionTaskManager
@@ -58,3 +59,24 @@ async def cancel_task(
     if task is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Task not found.")
     return task
+
+
+@router.get("/{task_id}/artifacts/{artifact_id}")
+async def get_task_artifact(
+    task_id: str,
+    artifact_id: str,
+    manager: ExecutionTaskManager = Depends(get_task_manager),
+) -> FileResponse:
+    task = await manager.get_task(task_id)
+    if task is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Task not found.")
+
+    artifact = await manager.get_task_artifact(task_id, artifact_id)
+    if artifact is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Artifact not found.")
+
+    return FileResponse(
+        artifact.path,
+        media_type=artifact.media_type,
+        filename=artifact.filename,
+    )

@@ -54,6 +54,10 @@ class PyTegBotApiClient:
             raise
         return ExecutionTaskResponse.model_validate(response.json())
 
+    async def download_artifact(self, task_id: str, artifact_id: str) -> bytes:
+        response = await self._request("GET", f"/v1/tasks/{task_id}/artifacts/{artifact_id}")
+        return response.content
+
     async def wait_for_terminal(
         self,
         task_id: str,

@@ -7,13 +7,19 @@ execution:
   docker_base_url: "unix://var/run/docker.sock"
   execution_image: "pytegbot-runner:local"
   max_concurrent_tasks: 2
-  max_timeout_seconds: 20
+  max_timeout_seconds: 40
   task_ttl_seconds: 1800
   cleanup_interval_seconds: 60
   memory_limit: "200m"
   nano_cpus: 200000000
   max_output_bytes: 262144
   code_env_var: "PYTEGBOT_CODE_B64"
+  output_dir: "/tmp/pytegbot-out"
+  output_dir_env_var: "PYTEGBOT_OUTPUT_DIR"
+  max_artifact_count: 4
+  max_artifact_bytes_per_file: 4194304
+  max_artifact_bytes_total: 8388608
+  artifact_storage_dir: "/tmp/pytegbot-artifacts"
 
 logging:
   level: "INFO"

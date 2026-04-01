@@ -28,8 +28,9 @@ The repository contains four parts:
 4. One of the execution workers picks the job up.
 5. The API creates a separate Docker container from the runner image and passes the code through a base64-encoded environment variable.
 6. The runner decodes the payload, compiles it, and executes it with `exec(...)`.
-7. The API waits for container completion, reads stdout/stderr from Docker logs, stores the result, and removes the container.
-8. The bot polls the API until it receives the final result and edits the Telegram message.
+7. If the code produces image files, the runner writes an artifact manifest and the API copies the files out of the still-running container.
+8. The API stores stdout/stderr, task status, and any extracted image artifacts for a limited time, then removes the container.
+9. The bot polls the API until it receives the final result, edits the Telegram message, and then sends image artifacts as separate Telegram media messages.
 
 ## Execution Isolation
 
@@ -48,7 +49,7 @@ Each Python snippet runs in its own disposable Docker container with these restr
 Default limits are configured in `config/api.yaml`:
 
 - max concurrent tasks: `2`
-- max timeout: `20` seconds
+- max timeout: `40` seconds
 - memory limit: `200m`
 - CPU limit: `0.2 CPU`
 - task TTL in memory: `30 minutes`
@@ -74,6 +75,170 @@ The executor intentionally does not bundle HTTP-focused libraries as a default f
 
 On low-power hosts such as a Raspberry Pi, importing heavier libraries like `numpy` or `sympy` can take a noticeable part of the execution timeout during a cold start.
 
+For image-oriented code, the runner also includes:
+
+- `Pillow`: image generation and editing
+- `matplotlib`: charts and plots
+- `plotly`: chart construction APIs
+
+`plotly` is available, but this project currently returns image files, not HTML artifacts. For practical Telegram output, `Pillow` and `matplotlib` are the main built-in options.
+
+## Image Output and Artifacts
+
+PyTegBot can return image files produced by Python code in normal bot chats.
+
+Image artifact delivery currently applies to:
+
+- private chats
+- groups and supergroups via `/code`
+
+It does not currently apply to inline mode.
+
+### How Image Discovery Works
+
+The runner sets the current working directory to the configured output directory before user code starts:
+
+- default output directory: `/tmp/pytegbot-out`
+
+That means relative paths work naturally. For example, all of these are valid:
+
+```python
+img.save("plot.png")
+plt.savefig("chart.png")
+img.save("nested/result.png")
+```
+
+The runner scans the output directory recursively after the user code finishes and writes a small manifest describing discovered image files.
+
+Supported file types are:
+
+- `png`
+- `jpg`
+- `jpeg`
+- `gif`
+- `webp`
+
+Only regular files are considered. Symlinks are ignored.
+
+### Matplotlib Behavior
+
+`matplotlib` is configured to use the non-GUI `Agg` backend inside the execution container.
+
+Two common patterns are supported:
+
+1. Explicit save:
+
+```python
+import matplotlib.pyplot as plt
+
+plt.plot([1, 2, 3], [1, 4, 9])
+plt.savefig("plot.png")
+```
+
+2. Auto-export of still-open figures:
+
+```python
+import matplotlib.pyplot as plt
+
+plt.plot([1, 2, 3], [1, 4, 9])
+print("figure created")
+```
+
+If `matplotlib.pyplot` was imported and there are still open figures when user code ends, the runner attempts to export them automatically as:
+
+- `figure-1.png`
+- `figure-2.png`
+- and so on
+
+This is useful when a user forgets to call `savefig(...)`, or when they use `plt.show()` in a non-interactive environment.
+
+### How the API Stores Images
+
+When the runner announces that artifacts are ready, the API copies them out of the container and stores them temporarily on the API side.
+
+Default storage paths:
+
+- runner output directory: `/tmp/pytegbot-out`
+- API artifact storage: `/tmp/pytegbot-artifacts`
+
+Artifacts are stored under a per-task directory in the API container:
+
+- `/tmp/pytegbot-artifacts/<task_id>/`
+
+The public task response includes only artifact metadata:
+
+- `artifact_id`
+- `filename`
+- `media_type`
+- `size_bytes`
+
+The actual file content is downloaded through the artifact endpoint.
+
+### Telegram Delivery
+
+The bot sends results in two phases:
+
+1. It edits the status message into the final text result.
+2. It downloads any task artifacts from the API and sends them as separate Telegram media messages.
+
+Telegram mapping is currently:
+
+- PNG/JPEG -> photo
+- GIF -> animation
+- everything else -> document
+
+### Retention and Cleanup
+
+Artifacts live for the same TTL as task results.
+
+By default:
+
+- task/artifact TTL: `1800` seconds (`30 minutes`)
+- cleanup interval: `60` seconds
+
+Once a task expires from the in-memory store, its artifact directory is deleted from API storage as well.
+
+Important practical note:
+
+- artifacts are stored inside the API container filesystem, not on a host bind mount
+- if the API container is restarted or redeployed, stored artifacts are lost even if the TTL has not expired yet
+
+### Artifact Limits
+
+Default artifact limits are configured in `config/api.yaml`:
+
+- max artifact count: `4`
+- max artifact size per file: `4 MiB`
+- max total artifact size per task: `8 MiB`
+
+Files that exceed these limits are ignored and will not be returned to the bot.
+
+### User Guidance
+
+For the most reliable behavior, tell users to save images explicitly:
+
+```python
+plt.savefig("plot.png")
+```
+
+or:
+
+```python
+from PIL import Image
+
+img = Image.new("RGB", (200, 100), "white")
+img.save("result.png")
+```
+
+Relative paths are preferred because the runner already changes into the output directory.
+
+### Limitations
+
+- Inline mode does not currently return image artifacts.
+- Image artifacts are delivered only after the task reaches a terminal state.
+- Heavy libraries such as `matplotlib` can consume a large part of the timeout budget on small hosts such as Raspberry Pi.
+- If a task times out during late-stage finalization, text output may still be present while an image is missing.
+
 ## Bot Behavior
 
 - Private chats: send Python code directly.
@@ -96,6 +261,7 @@ The API is bearer-token protected and exposes:
 - `POST /v1/tasks`
 - `GET /v1/tasks/{task_id}`
 - `POST /v1/tasks/{task_id}/cancel`
+- `GET /v1/tasks/{task_id}/artifacts/{artifact_id}`
 
 Jobs are not stored in a database. They live in an in-memory store and are cleaned up automatically after the configured TTL.
 

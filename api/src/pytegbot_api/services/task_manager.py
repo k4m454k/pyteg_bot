@@ -5,6 +5,7 @@ from contextlib import suppress
 from typing import cast
 
 from pytegbot_api.core.config import ExecutionSettings
+from pytegbot_api.services.artifact_store import ArtifactStore, StoredArtifact
 from pytegbot_api.services.docker_executor import DockerCodeExecutor
 from pytegbot_api.services.task_store import InMemoryTaskStore
 from pytegbot_shared.models import ExecutionTaskResponse, HealthResponse, TaskStatus
@@ -16,10 +17,12 @@ class ExecutionTaskManager:
         *,
         settings: ExecutionSettings,
         store: InMemoryTaskStore,
+        artifact_store: ArtifactStore,
         executor: DockerCodeExecutor,
     ) -> None:
         self._settings = settings
         self._store = store
+        self._artifact_store = artifact_store
         self._executor = executor
         self._queue: asyncio.Queue[str | None] = asyncio.Queue()
         self._workers: list[asyncio.Task[None]] = []
@@ -30,6 +33,7 @@ class ExecutionTaskManager:
         if self._started:
             return
         self._started = True
+        await self._artifact_store.ensure_base_dir()
         self._workers = [
             asyncio.create_task(self._worker_loop(index), name=f"pytegbot-worker-{index}")
             for index in range(self._settings.max_concurrent_tasks)
@@ -93,6 +97,9 @@ class ExecutionTaskManager:
             await self._executor.cancel(task_id)
         return task
 
+    async def get_task_artifact(self, task_id: str, artifact_id: str) -> StoredArtifact | None:
+        return await self._artifact_store.get_artifact(task_id, artifact_id)
+
     async def health(self) -> HealthResponse:
         return HealthResponse(
             status="ok",
@@ -121,15 +128,22 @@ class ExecutionTaskManager:
             code=record.code,
             timeout_seconds=record.timeout_seconds,
         )
+        artifact_summaries = await self._artifact_store.save_task_artifacts(
+            task_id,
+            result.artifacts or [],
+        )
         await self._store.apply_result(
             task_id,
             status=result.status,
             output=result.output,
             error=result.error,
             exit_code=result.exit_code,
+            artifacts=artifact_summaries,
         )
 
     async def _cleanup_loop(self) -> None:
         while True:
             await asyncio.sleep(self._settings.cleanup_interval_seconds)
-            await self._store.cleanup_expired()
+            expired_task_ids = await self._store.cleanup_expired()
+            for task_id in expired_task_ids:
+                await self._artifact_store.delete_task_artifacts(task_id)

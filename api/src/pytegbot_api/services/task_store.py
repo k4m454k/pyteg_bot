@@ -6,7 +6,12 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 
-from pytegbot_shared.models import ExecutionTaskResponse, TaskStatus, TERMINAL_STATUSES
+from pytegbot_shared.models import (
+    ExecutionTaskResponse,
+    TaskArtifactSummary,
+    TaskStatus,
+    TERMINAL_STATUSES,
+)
 
 
 def utcnow() -> datetime:
@@ -29,6 +34,7 @@ class TaskRecord:
     output: str | None = None
     error: str | None = None
     cancel_requested: bool = False
+    artifacts: list[TaskArtifactSummary] | None = None
 
     def to_response(self) -> ExecutionTaskResponse:
         return ExecutionTaskResponse(
@@ -45,6 +51,7 @@ class TaskRecord:
             output=self.output,
             error=self.error,
             cancel_requested=self.cancel_requested,
+            artifacts=list(self.artifacts or []),
         )
 
 
@@ -125,6 +132,7 @@ class InMemoryTaskStore:
         output: str | None,
         error: str | None,
         exit_code: int | None,
+        artifacts: list[TaskArtifactSummary] | None = None,
     ) -> ExecutionTaskResponse | None:
         async with self._lock:
             record = self._tasks.get(task_id)
@@ -141,11 +149,12 @@ class InMemoryTaskStore:
             record.output = output
             record.error = error
             record.exit_code = exit_code
+            record.artifacts = list(artifacts or [])
             record.finished_at = now
             record.updated_at = now
             return deepcopy(record).to_response()
 
-    async def cleanup_expired(self) -> int:
+    async def cleanup_expired(self) -> list[str]:
         now = utcnow()
         async with self._lock:
             expired_task_ids = [
@@ -155,7 +164,7 @@ class InMemoryTaskStore:
             ]
             for task_id in expired_task_ids:
                 self._tasks.pop(task_id, None)
-            return len(expired_task_ids)
+            return expired_task_ids
 
     async def running_task_ids(self) -> list[str]:
         async with self._lock:

@@ -38,6 +38,13 @@ class ExecutionTaskAccepted(BaseModel):
     timeout_seconds: int
 
 
+class TaskArtifactSummary(BaseModel):
+    artifact_id: str
+    filename: str
+    media_type: str
+    size_bytes: int = Field(ge=0)
+
+
 class ExecutionTaskResponse(BaseModel):
     task_id: str
     status: TaskStatus
@@ -52,6 +59,7 @@ class ExecutionTaskResponse(BaseModel):
     output: str | None = None
     error: str | None = None
     cancel_requested: bool = False
+    artifacts: list[TaskArtifactSummary] = Field(default_factory=list)
 
     @property
     def is_finished(self) -> bool:
