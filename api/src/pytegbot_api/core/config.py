@@ -26,8 +26,8 @@ class ExecutionSettings(BaseModel):
     )
     task_ttl_seconds: int = Field(default=1800, ge=60)
     cleanup_interval_seconds: int = Field(default=60, ge=5)
-    memory_limit: str = "200m"
-    nano_cpus: int = Field(default=200_000_000, ge=1)
+    memory_limit: str = "400m"
+    nano_cpus: int = Field(default=400_000_000, ge=1)
     max_output_bytes: int = Field(default=262_144, ge=1_024, le=16_777_216)
     code_env_var: str = "PYTEGBOT_CODE_B64"
     output_dir: str = "/tmp/pytegbot-out"

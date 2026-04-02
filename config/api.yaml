@@ -10,8 +10,8 @@ execution:
   max_timeout_seconds: 40
   task_ttl_seconds: 1800
   cleanup_interval_seconds: 60
-  memory_limit: "200m"
-  nano_cpus: 200000000
+  memory_limit: "400m"
+  nano_cpus: 400000000
   max_output_bytes: 262144
   code_env_var: "PYTEGBOT_CODE_B64"
   output_dir: "/tmp/pytegbot-out"

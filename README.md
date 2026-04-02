@@ -50,8 +50,8 @@ Default limits are configured in `config/api.yaml`:
 
 - max concurrent tasks: `2`
 - max timeout: `40` seconds
-- memory limit: `200m`
-- CPU limit: `0.2 CPU`
+- memory limit: `400m`
+- CPU limit: `0.4 CPU`
 - task TTL in memory: `30 minutes`
 
 ## Preinstalled Executor Libraries
