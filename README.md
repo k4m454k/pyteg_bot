@@ -26,8 +26,10 @@ The repository contains four parts:
 2. The bot creates a job through the API.
 3. The API stores the job in memory and pushes the job ID into an async queue.
 4. One of the execution workers picks the job up.
-5. The API creates a separate Docker container from the runner image and passes the code through a base64-encoded environment variable.
-6. The runner decodes the payload, compiles it, and executes it with `exec(...)`.
+5. The API creates a separate Docker container from the runner image and chooses an internal code transport:
+   - small payloads go through a base64-encoded environment variable
+   - larger payloads are streamed into the runner through container stdin
+6. The runner loads the source code, compiles it, and executes it with `exec(...)`.
 7. If the code produces image files, the runner writes an artifact manifest and the API copies the files out of the still-running container.
 8. The API stores stdout/stderr, task status, and any extracted image artifacts for a limited time, then removes the container.
 9. The bot polls the API until it receives the final result, edits the Telegram message, and then sends image artifacts as separate Telegram media messages.
@@ -252,6 +254,72 @@ Valid fenced code blocks include:
 - ```` ```python3 ````
 - ```` ```py ````
 - ```` ```py3 ````
+
+## Python File Uploads
+
+The bot can also execute a Python source file sent as a Telegram document.
+
+Supported chat flows:
+
+- Private chats: send one `.py` file directly.
+- Groups and supergroups: send one `.py` file with a caption that starts with `/code`.
+- Inline mode: file uploads are not supported.
+
+Validation rules:
+
+- exactly one file must be sent
+- the filename must end with `.py`
+- maximum file size is `5 MiB`
+- the file must decode as valid text source
+- empty files are rejected
+
+If a media group contains multiple files, the bot rejects it and asks for a single `.py` file.
+
+The bot downloads the document, decodes it using Python source encoding detection, and then sends the decoded source text to the API as a normal execution task. The external API contract does not change just because the user uploaded a file.
+
+Telegram responses for file submissions are intentionally different from text submissions:
+
+- the intermediate status message shows the accepted filename
+- the final result message shows the filename and execution result
+- the original source code is not echoed back into the chat
+
+This makes large script execution less noisy in chats and avoids reposting a long file body into Telegram.
+
+## Large Code Transport
+
+Large code payloads are handled differently inside the execution pipeline.
+
+Why this exists:
+
+- Linux environment variables are a poor transport for multi-megabyte source files
+- base64 adds size overhead
+- very large `argv/env` payloads run into kernel and process startup limits
+
+PyTegBot therefore uses a hybrid transport strategy inside the API:
+
+- if the UTF-8 source is at or below `execution.max_env_code_bytes`, the API uses the existing environment-variable path
+- if the source is larger than that threshold, the API starts the runner container with stdin open and streams the raw source code directly into container stdin
+
+Default threshold:
+
+- `execution.max_env_code_bytes: 97280`
+
+For the stdin path, the runner switches into a dedicated input mode and reads the full source from stdin before executing user code.
+
+This has two practical advantages:
+
+- large `.py` uploads do not depend on oversized environment variables
+- the API no longer needs to split big files into many small helper uploads
+
+The upload phase has its own short timeout:
+
+- `execution.code_upload_timeout_seconds: 15`
+
+The normal Python execution timeout remains separate:
+
+- `execution.max_timeout_seconds: 40`
+
+So large file delivery and code execution are treated as different phases. A slow upload can fail quickly without consuming the full execution budget, while successfully uploaded code still gets the normal runner timeout.
 
 ## API Endpoints
 
