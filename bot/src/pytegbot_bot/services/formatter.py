@@ -167,6 +167,80 @@ def format_request_error_message(code: str, error_text: str) -> str:
     )
 
 
+def format_executing_file_message(
+    filename: str,
+    *,
+    status: TaskStatus,
+) -> str:
+    return "\n".join(
+        [
+            f"<b>Status:</b> {escape(STATUS_LABELS[status])}",
+            "<b>File</b>",
+            f"<pre>Accepted Python file: {escape(truncate(filename, 256))}</pre>",
+        ]
+    )
+
+
+def format_execution_file_message(filename: str, task: ExecutionTaskResponse) -> str:
+    safe_filename = truncate(filename, 256)
+    safe_error = None
+    if task.error and task.error != task.output:
+        safe_error = truncate(task.error, MAX_ERROR_CHARS)
+
+    visible_parts = [
+        f"Status: {STATUS_LABELS[task.status]}",
+        "File",
+        safe_filename,
+        "Result",
+    ]
+    parts = [
+        f"<b>Status:</b> {escape(STATUS_LABELS[task.status])}",
+    ]
+
+    if task.exit_code is not None:
+        visible_parts.append(f"Exit code: {task.exit_code}")
+        parts.append(f"<b>Exit code:</b> {task.exit_code}")
+    execution_time = execution_duration_text(task)
+    if execution_time:
+        visible_parts.append(f"Execution time: {execution_time}")
+        parts.append(f"<b>Execution time:</b> {execution_time}")
+    if safe_error is not None:
+        visible_parts.extend(["Error", safe_error])
+
+    safe_body = fit_result_text(execution_body(task), reserved_parts=visible_parts)
+
+    parts.extend(
+        [
+            "<b>File</b>",
+            f"<pre>{escape(safe_filename)}</pre>",
+            "<b>Result</b>",
+            f"<pre>{escape(safe_body)}</pre>",
+        ]
+    )
+
+    if safe_error is not None:
+        parts.extend(
+            [
+                "<b>Error</b>",
+                f"<pre>{escape(safe_error)}</pre>",
+            ]
+        )
+
+    return "\n".join(parts)
+
+
+def format_request_error_file_message(filename: str, error_text: str) -> str:
+    return "\n".join(
+        [
+            "<b>Status:</b> API error",
+            "<b>File</b>",
+            f"<pre>{escape(truncate(filename, 256))}</pre>",
+            "<b>Error</b>",
+            f"<pre>{escape(truncate(error_text, MAX_ERROR_CHARS))}</pre>",
+        ]
+    )
+
+
 def format_inline_executing_message(
     *,
     status: TaskStatus,

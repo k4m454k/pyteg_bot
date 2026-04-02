@@ -4,6 +4,7 @@ import asyncio
 import base64
 import io
 import json
+import socket
 import shlex
 import tarfile
 import time
@@ -97,8 +98,18 @@ class DockerCodeExecutor:
                     error="Task cancelled before container start.",
                 )
 
-            encoded_code = base64.b64encode(code.encode("utf-8")).decode("ascii")
-            container = await asyncio.to_thread(self._create_container, task_id, encoded_code)
+            code_bytes = code.encode("utf-8")
+            encoded_code = None
+            upload_via_stdin = len(code_bytes) > self._settings.max_env_code_bytes
+            if not upload_via_stdin:
+                encoded_code = base64.b64encode(code_bytes).decode("ascii")
+
+            container = await asyncio.to_thread(
+                self._create_container,
+                task_id,
+                encoded_code,
+                upload_via_stdin,
+            )
             handle.container = container
 
             if handle.cancel_requested:
@@ -108,6 +119,23 @@ class DockerCodeExecutor:
                 )
 
             await asyncio.to_thread(container.start)
+            if handle.cancel_requested:
+                await asyncio.to_thread(self._kill_container, container)
+                return ExecutionResult(
+                    status=TaskStatus.CANCELLED,
+                    error="Task cancelled before code upload.",
+                )
+            if upload_via_stdin:
+                try:
+                    await asyncio.wait_for(
+                        asyncio.to_thread(self._upload_code_via_stdin, container, code),
+                        timeout=self._settings.code_upload_timeout_seconds,
+                    )
+                except asyncio.TimeoutError as exc:
+                    await asyncio.to_thread(self._kill_container, container)
+                    raise DockerException(
+                        f"Code upload exceeded {self._settings.code_upload_timeout_seconds} seconds."
+                    ) from exc
 
             if handle.cancel_requested:
                 await asyncio.to_thread(self._kill_container, container)
@@ -204,24 +232,108 @@ class DockerCodeExecutor:
     async def close(self) -> None:
         await asyncio.to_thread(self._client.close)
 
-    def _create_container(self, task_id: str, encoded_code: str) -> Container:
+    def _create_container(
+        self,
+        task_id: str,
+        encoded_code: str | None,
+        use_stdin: bool,
+    ) -> Container:
+        environment = {
+            self._settings.output_dir_env_var: self._settings.output_dir,
+        }
+        if use_stdin:
+            environment[self._settings.code_stdin_env_var] = "1"
+        elif encoded_code is not None:
+            environment[self._settings.code_env_var] = encoded_code
+
         return self._client.containers.create(
             image=self._settings.execution_image,
             detach=True,
-            environment={
-                self._settings.code_env_var: encoded_code,
-                self._settings.output_dir_env_var: self._settings.output_dir,
-            },
+            environment=environment,
             labels={"pytegbot.task_id": task_id},
             mem_limit=self._settings.memory_limit,
             nano_cpus=self._settings.nano_cpus,
             network_disabled=True,
             read_only=True,
+            stdin_open=use_stdin,
             cap_drop=["ALL"],
             security_opt=["no-new-privileges"],
             pids_limit=64,
             tmpfs={"/tmp": "rw,noexec,nosuid,size=64m"},
         )
+
+    def _upload_code_via_stdin(self, container: Container, code: str) -> None:
+        attached = None
+        raw_socket = None
+        payload = code.encode("utf-8")
+
+        try:
+            attached = self._client.api.attach_socket(
+                container.id,
+                params={"stdin": 1, "stream": 1},
+            )
+            raw_socket = getattr(attached, "_sock", attached)
+            settimeout = getattr(raw_socket, "settimeout", None)
+            if callable(settimeout):
+                settimeout(self._settings.code_upload_timeout_seconds)
+
+            sendall = getattr(raw_socket, "sendall", None)
+            if callable(sendall):
+                sendall(payload)
+            else:
+                write = getattr(attached, "write", None)
+                if not callable(write):
+                    raise DockerException("Container stdin attachment is not writable.")
+                write(payload)
+                flush = getattr(attached, "flush", None)
+                if callable(flush):
+                    flush()
+
+            shutdown = getattr(raw_socket, "shutdown", None)
+            if callable(shutdown):
+                with suppress(OSError):
+                    shutdown(socket.SHUT_WR)
+        except (APIError, DockerException, OSError, NotFound) as exc:
+            raise DockerException(f"Failed to upload code via container stdin: {exc}") from exc
+        finally:
+            for candidate in (attached, raw_socket):
+                if candidate is None:
+                    continue
+                close = getattr(candidate, "close", None)
+                if callable(close):
+                    with suppress(Exception):
+                        close()
+
+    def _run_exec(
+        self,
+        container: Container,
+        command: list[str],
+        *,
+        environment: dict[str, str] | None = None,
+    ) -> bytes:
+        try:
+            result = container.exec_run(
+                command,
+                stdout=True,
+                stderr=True,
+                environment=environment,
+            )
+        except (APIError, DockerException, NotFound) as exc:
+            raise DockerException(f"Exec failed for {command!r}: {exc}") from exc
+
+        exit_code = getattr(result, "exit_code", None)
+        output = getattr(result, "output", None)
+        if exit_code is None and isinstance(result, tuple) and len(result) == 2:
+            exit_code, output = result
+
+        data = bytes(output) if isinstance(output, (bytes, bytearray)) else b""
+        if exit_code != 0:
+            message = data.decode("utf-8", errors="replace").strip()
+            if message:
+                raise DockerException(f"Exec failed for {command!r}: {message}")
+            raise DockerException(f"Exec failed for {command!r} with exit code {exit_code}.")
+        return data
+
 
     def _kill_container(self, container: Container) -> None:
         try:

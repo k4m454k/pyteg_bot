@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import io
 import re
+import tokenize
 
 CODE_BLOCK_RE = re.compile(r"```(?:python3?|py3?)?\s*(.*?)```", re.IGNORECASE | re.DOTALL)
 COMMAND_RE = re.compile(r"^/code(?:@(?P<username>[A-Za-z0-9_]+))?\b", re.IGNORECASE)
@@ -32,6 +34,18 @@ def extract_code_from_command(text: str, bot_username: str) -> str | None:
     return normalize_code(code_payload)
 
 
+def matches_code_command(text: str, bot_username: str) -> bool:
+    payload = text.lstrip()
+    match = COMMAND_RE.match(payload)
+    if not match:
+        return False
+
+    target_username = match.group("username")
+    if target_username and target_username.lower() != bot_username.lstrip("@").lower():
+        return False
+    return True
+
+
 def extract_code_from_message(text: str, bot_username: str) -> str | None:
     username = bot_username.lstrip("@")
     mention_pattern = re.compile(rf"@{re.escape(username)}\b", re.IGNORECASE)
@@ -44,3 +58,8 @@ def extract_code_from_message(text: str, bot_username: str) -> str | None:
 
 def extract_code_from_inline_query(text: str) -> str | None:
     return normalize_code(text)
+
+
+def decode_python_source_bytes(payload: bytes) -> str:
+    encoding, _ = tokenize.detect_encoding(io.BytesIO(payload).readline)
+    return payload.decode(encoding)

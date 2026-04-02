@@ -30,6 +30,11 @@ class ExecutionSettings(BaseModel):
     nano_cpus: int = Field(default=400_000_000, ge=1)
     max_output_bytes: int = Field(default=262_144, ge=1_024, le=16_777_216)
     code_env_var: str = "PYTEGBOT_CODE_B64"
+    code_stdin_env_var: str = "PYTEGBOT_CODE_STDIN"
+    code_file_env_var: str = "PYTEGBOT_CODE_FILE"
+    code_file_path: str = "/tmp/pytegbot-input/code.py"
+    max_env_code_bytes: int = Field(default=97_280, ge=4_096, le=262_144)
+    code_upload_timeout_seconds: int = Field(default=15, ge=1, le=120)
     output_dir: str = "/tmp/pytegbot-out"
     output_dir_env_var: str = "PYTEGBOT_OUTPUT_DIR"
     max_artifact_count: int = Field(default=4, ge=0, le=16)

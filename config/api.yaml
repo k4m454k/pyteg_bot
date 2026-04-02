@@ -14,6 +14,11 @@ execution:
   nano_cpus: 400000000
   max_output_bytes: 262144
   code_env_var: "PYTEGBOT_CODE_B64"
+  code_stdin_env_var: "PYTEGBOT_CODE_STDIN"
+  code_file_env_var: "PYTEGBOT_CODE_FILE"
+  code_file_path: "/tmp/pytegbot-input/code.py"
+  max_env_code_bytes: 97280
+  code_upload_timeout_seconds: 15
   output_dir: "/tmp/pytegbot-out"
   output_dir_env_var: "PYTEGBOT_OUTPUT_DIR"
   max_artifact_count: 4

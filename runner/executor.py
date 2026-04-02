@@ -10,7 +10,11 @@ import traceback
 from pathlib import Path
 
 OUTPUT_DIR_ENV_VAR = "PYTEGBOT_OUTPUT_DIR"
+CODE_STDIN_ENV_VAR = "PYTEGBOT_CODE_STDIN"
+CODE_FILE_ENV_VAR = "PYTEGBOT_CODE_FILE"
 DEFAULT_OUTPUT_DIR = "/tmp/pytegbot-out"
+CODE_FILE_WAIT_TIMEOUT_SECONDS = 60.0
+CODE_FILE_WAIT_POLL_INTERVAL_SECONDS = 0.05
 MATPLOTLIB_CONFIG_DIR = "/tmp/pytegbot-matplotlib"
 MATPLOTLIB_CONFIG_SEED_DIR = "/opt/matplotlib-seed"
 MANIFEST_FILENAME = ".pytegbot-artifacts.json"
@@ -116,22 +120,60 @@ def prepare_runtime_environment() -> None:
     os.environ["MPLCONFIGDIR"] = str(runtime_mpl_dir)
 
 
+def load_code() -> tuple[str | None, int]:
+    if os.environ.get(CODE_STDIN_ENV_VAR, "").strip():
+        try:
+            payload = sys.stdin.buffer.read()
+        except Exception as exc:  # noqa: BLE001
+            print(f"Failed to read code from stdin: {exc}", file=sys.stderr)
+            return None, 2
+        if not payload:
+            print("Missing code on stdin.", file=sys.stderr)
+            return None, 2
+        try:
+            return payload.decode("utf-8"), 0
+        except UnicodeDecodeError as exc:
+            print(f"Failed to decode stdin payload: {exc}", file=sys.stderr)
+            return None, 2
+
+    code_file = os.environ.get(CODE_FILE_ENV_VAR, "").strip()
+    if code_file:
+        code_path = Path(code_file)
+        deadline = time.monotonic() + CODE_FILE_WAIT_TIMEOUT_SECONDS
+        try:
+            while True:
+                try:
+                    return code_path.read_text(encoding="utf-8"), 0
+                except FileNotFoundError:
+                    if time.monotonic() >= deadline:
+                        print(f"Missing code file: {code_file}", file=sys.stderr)
+                        return None, 2
+                    time.sleep(CODE_FILE_WAIT_POLL_INTERVAL_SECONDS)
+        except Exception as exc:  # noqa: BLE001
+            print(f"Failed to read code file: {exc}", file=sys.stderr)
+            return None, 2
+
+    encoded = os.environ.get("PYTEGBOT_CODE_B64", "")
+    if not encoded:
+        print("Missing PYTEGBOT_CODE_B64 environment variable.", file=sys.stderr)
+        return None, 2
+
+    try:
+        return base64.b64decode(encoded).decode("utf-8"), 0
+    except Exception as exc:  # noqa: BLE001
+        print(f"Failed to decode payload: {exc}", file=sys.stderr)
+        return None, 2
+
+
 def main() -> int:
     prepare_runtime_environment()
     output_dir = Path(os.environ.get(OUTPUT_DIR_ENV_VAR, DEFAULT_OUTPUT_DIR))
     output_dir.mkdir(parents=True, exist_ok=True)
     os.chdir(output_dir)
 
-    encoded = os.environ.get("PYTEGBOT_CODE_B64", "")
-    if not encoded:
-        print("Missing PYTEGBOT_CODE_B64 environment variable.", file=sys.stderr)
-        return 2
-
-    try:
-        code = base64.b64decode(encoded).decode("utf-8")
-    except Exception as exc:  # noqa: BLE001
-        print(f"Failed to decode payload: {exc}", file=sys.stderr)
-        return 2
+    code, load_exit_code = load_code()
+    if code is None:
+        return load_exit_code
 
     globals_dict = {"__name__": "__main__"}
     exit_code = 0
