@@ -6,6 +6,8 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
+MAX_EXECUTION_CODE_CHARS = 5 * 1024 * 1024
+
 
 class TaskStatus(StrEnum):
     QUEUED = "queued"
@@ -27,7 +29,7 @@ TERMINAL_STATUSES = frozenset(
 
 
 class ExecutionTaskCreateRequest(BaseModel):
-    code: str = Field(min_length=1, max_length=40000)
+    code: str = Field(min_length=1, max_length=MAX_EXECUTION_CODE_CHARS)
     source: Literal["message", "inline", "api"] = "api"
     timeout_seconds: int | None = Field(default=None, ge=1, le=300)
 

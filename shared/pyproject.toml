@@ -1,8 +1,12 @@
-[tool.poetry]
+[project]
 name = "pytegbot-shared"
 version = "0.1.0"
 description = "Shared models and config helpers for PyTegBot"
-authors = ["k4m454k"]
+authors = [{ name = "k4m454k" }]
+requires-python = ">=3.12,<4.0"
+dynamic = ["dependencies"]
+
+[tool.poetry]
 packages = [{ include = "pytegbot_shared", from = "src" }]
 
 [tool.poetry.dependencies]

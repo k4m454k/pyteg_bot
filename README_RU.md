@@ -298,18 +298,21 @@ img.save("result.png")
 Поэтому PyTegBot использует гибридную стратегию внутренней передачи кода:
 
 - если UTF-8 исходник не превышает `execution.max_env_code_bytes`, API использует путь через переменную окружения
-- если исходник больше этого порога, API запускает runner-контейнер с открытым stdin и стримит raw source code прямо в stdin контейнера
+- если исходник больше этого порога, API копирует исходник внутрь runner-контейнера как временный `.py` файл и затем запускает выполнение уже из этого файла
 
 Порог по умолчанию:
 
 - `execution.max_env_code_bytes: 97280`
 
-Для stdin path runner переключается в отдельный input mode и полностью считывает исходник из stdin до начала исполнения пользовательского кода.
+Путь к временному файлу задаётся в конфиге:
+
+- `execution.code_file_path`
 
 Практические плюсы:
 
 - большие `.py` файлы не зависят от oversized environment variables
-- API больше не нужно разбивать крупные файлы на множество маленьких helper upload-ов
+- API не зависит от oversized environment variables даже для мегабайтных payload’ов
+- маленькие сниппеты остаются быстрыми, потому что для них сохраняется env-based path
 
 У upload phase есть отдельный короткий timeout:
 
@@ -320,6 +323,39 @@ img.save("result.png")
 - `execution.max_timeout_seconds: 40`
 
 То есть доставка большого файла и исполнение кода считаются разными фазами. Медленная загрузка может быстро завершиться ошибкой, не съедая весь execution budget, а успешно загруженный код всё равно получает нормальный timeout runner-а.
+
+## Local Testing
+
+В репозитории есть `Makefile` для локальной проверки без деплоя на Raspberry Pi.
+
+Доступные цели:
+
+- `make build_test`: собирает `pytegbot-runner:local`, устанавливает test dependencies для API и переустанавливает `shared` в editable-режиме внутри API virtualenv
+- `make test`: запускает текущий автоматизированный test suite
+- `make lint`: запускает `poetry check` для `shared`, `api`, `bot` и затем `compileall` по исходникам
+
+Полный локальный прогон:
+
+```bash
+make build_test test lint
+```
+
+Сейчас автоматические тесты покрывают в первую очередь API integration flow. Проверяются:
+
+- `GET /health`
+- bearer auth на `POST /v1/tasks`
+- выполнение маленького Python-кода
+- выполнение большого Python-кода
+- отмена задачи
+- возврат и скачивание image artifact
+
+Для локальных тестов нужен работающий Docker daemon, потому что test suite поднимает настоящий runner image и проверяет реальное выполнение кода в Docker.
+
+Если Docker daemon доступен не через стандартный сокет, можно явно задать base URL:
+
+```bash
+PYTEGBOT_TEST_DOCKER_BASE_URL="unix:///path/to/docker.sock" make test
+```
 
 ## API Endpoints
 

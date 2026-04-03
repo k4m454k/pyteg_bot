@@ -12,5 +12,9 @@ inline:
   cache_time_seconds: 0
   execution_timeout_seconds: 15
 
+message:
+  max_py_file_bytes: 5242880
+  media_group_track_seconds: 300.0
+
 logging:
   level: "INFO"

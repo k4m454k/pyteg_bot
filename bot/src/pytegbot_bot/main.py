@@ -10,7 +10,7 @@ from aiogram.types import BotCommand
 
 from pytegbot_bot.core.config import get_settings
 from pytegbot_bot.handlers.inline import build_router as build_inline_router
-from pytegbot_bot.handlers.message import build_router as build_message_router
+from pytegbot_bot.handlers.message import configure_router as configure_message_router
 from pytegbot_bot.services.api_client import PyTegBotApiClient
 from pytegbot_bot.services.inline_coordinator import InlineExecutionCoordinator
 
@@ -52,10 +52,11 @@ async def run() -> None:
 
     dispatcher = Dispatcher()
     dispatcher.include_router(
-        build_message_router(
+        configure_message_router(
             bot_username=me.username,
             api_client=api_client,
             poll_interval_seconds=settings.api.poll_interval_seconds,
+            settings=settings.message,
         )
     )
     dispatcher.include_router(build_inline_router(coordinator=inline_coordinator))

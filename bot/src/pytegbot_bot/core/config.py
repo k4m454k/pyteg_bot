@@ -25,6 +25,11 @@ class InlineSettings(BaseModel):
     execution_timeout_seconds: int = Field(default=15, ge=1, le=300)
 
 
+class MessageSettings(BaseModel):
+    max_py_file_bytes: int = Field(default=5 * 1024 * 1024, ge=1_024, le=20 * 1024 * 1024)
+    media_group_track_seconds: float = Field(default=300.0, gt=0)
+
+
 class LoggingSettings(BaseModel):
     level: str = "INFO"
 
@@ -35,6 +40,7 @@ class BotSettings(BaseSettings):
     telegram: TelegramSettings = Field(default_factory=TelegramSettings)
     api: ApiClientSettings = Field(default_factory=ApiClientSettings)
     inline: InlineSettings = Field(default_factory=InlineSettings)
+    message: MessageSettings = Field(default_factory=MessageSettings)
     logging: LoggingSettings = Field(default_factory=LoggingSettings)
 
     @classmethod
